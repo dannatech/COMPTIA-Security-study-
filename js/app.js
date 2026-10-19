@@ -1181,8 +1181,8 @@
     var root = document.documentElement;
     try {
       var saved = localStorage.getItem("secplus.theme");
-      if (saved) root.setAttribute("data-theme", saved);
-    } catch (e) { /* ignore */ }
+      root.setAttribute("data-theme", saved || "light");
+    } catch (e) { root.setAttribute("data-theme", "light"); }
     document.getElementById("themeToggle").onclick = function () {
       var dark = root.getAttribute("data-theme")
         ? root.getAttribute("data-theme") === "dark"
