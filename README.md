@@ -9,8 +9,9 @@ An interactive, DataCamp-style learning platform for the **CompTIA Security+ SY0
 | Area | What it does |
 | --- | --- |
 | **Dashboard** | "Continue learning" to your next lesson, a daily XP goal ring, level, streak, course progress, 14-day activity chart, and progress export/import |
-| **Courses** | 5 courses (one per exam domain) with 28 lessons (one per exam objective) |
-| **Lesson player** | Short concept slides alternate with 3–6 exercises (unseen questions first) that give instant feedback and explanations |
+| **Courses** | 5 courses (one per exam domain) with 28 in-depth chapters (one per exam objective), each ending in a 15-question **domain checkpoint** |
+| **Interactive chapters** | Read a section, then answer a knowledge check about it before moving on. Each chapter ends with a worked exam scenario (with a step-by-step walkthrough), exam tips and common traps, and a 3-question chapter quiz |
+| **Reading mode** | The full chapter as one page, with its table of contents and the same knowledge checks inline |
 | **Hands-on labs** | 26 performance-based-style labs: firewall rule builders tested against simulated traffic, log analysis (select the malicious lines), drag-to-order steps, matching/categorizing, and risk/backup calculations |
 | **Question bank** | 330 scenario questions covering all 28 objectives (at least 5 per objective), split by domain roughly in line with the exam weights |
 | **Daily practice** | 5 questions, weighted toward your weakest domains |
@@ -35,7 +36,9 @@ Progress is saved in your browser's `localStorage`. Use **Export progress** on t
 
 All study content lives in `js/data/`:
 
-- `domains.js` holds the domains, weights and per-objective lesson notes (each `points` entry is one bullet; lessons show 3 per slide).
+- `domains.js` holds the domains, weights and short per-objective notes.
+- `chapters-d1.js` … `chapters-d5.js` hold the in-depth chapters: `{ overview, sections: [{ h, html }], tips, traps }`. Each section is followed by the most relevant question for that objective.
+- `scenarios.js` holds one worked scenario per objective (question, choices, answer and an HTML walkthrough).
 - `questions-d1.js` … `questions-d5.js` hold most of the question bank in a compact format: `[objective, question, choices, answer, explanation]`.
 - `labs.js` holds the hands-on labs (types: `order`, `match`, `firewall`, `logs`, `numeric`). See the existing labs for each type's fields.
 - `questions.js` holds the original practice questions. `a` is the index of the correct choice, or an array of indexes for "choose two". Choices are shuffled when shown, so they can be written in any order.

@@ -272,7 +272,7 @@
     html += '<div class="grid grid-4" style="margin-top:16px">' +
       statTile("Level " + lvl, st.xp + " XP total", progressBar(lvlPct)) +
       statTile(store.streak() + " 🔥", "day streak") +
-      statTile(lessonsDone + "/" + totalLessons, "lessons completed", progressBar(Math.round(lessonsDone / totalLessons * 100))) +
+      statTile(lessonsDone + "/" + totalLessons, "chapters completed", progressBar(Math.round(lessonsDone / totalLessons * 100))) +
       statTile(acc === null ? "—" : acc + "%", "question accuracy") +
       "</div>";
 
@@ -375,20 +375,29 @@
     var d = domainById(Number(id));
     if (!d) return notFound();
     var p = domainLessonProgress(d);
+    var cp = store.state.checkpoints[d.id];
     var html = '<div class="page-head"><a href="#/courses" class="small">← All courses</a>' +
       '<h1 style="margin-top:8px"><span class="dot" style="background:' + d.color + '"></span>' + d.id + ". " + esc(d.name) + "</h1>" +
-      "<p>" + d.weight + "% of the exam · " + p.done + " of " + p.total + " lessons complete</p></div>";
+      "<p>" + d.weight + "% of the exam · " + p.done + " of " + p.total + " chapters complete</p></div>";
     html += '<div class="lesson-list">';
     d.objectives.forEach(function (o, i) {
       var l = store.state.lessons[o.id];
+      var ch = S.chapters[o.id];
       html += '<div class="card lesson-item">' +
         '<div class="lesson-num' + (l ? " done" : "") + '">' + (l ? "✓" : i + 1) + "</div>" +
-        '<div class="lesson-body"><div class="small muted">Objective ' + o.id + "</div><strong>" + esc(o.title) + "</strong>" +
+        '<div class="lesson-body"><div class="small muted">Chapter ' + o.id +
+        (ch ? " · " + ch.sections.length + " sections · " + (ch.sections.length + 5) + " questions" : "") + "</div><strong>" + esc(o.title) + "</strong>" +
         (l ? '<div class="small muted">Best score: ' + l.score + "/" + l.total + "</div>" : "") +
-        '<details class="notes"><summary class="small">Quick notes</summary><ul>' +
-        o.points.map(function (pt) { return "<li>" + pt + "</li>"; }).join("") + "</ul></details></div>" +
-        '<a class="btn ' + (l ? "" : "primary") + '" href="#/lesson/' + o.id + '">' + (l ? "Replay" : "Start") + "</a></div>";
+        (ch ? '<p class="small muted chapter-blurb">' + ch.overview + "</p>" : "") + "</div>" +
+        '<div class="lesson-actions"><a class="btn ' + (l ? "" : "primary") + '" href="#/lesson/' + o.id + '">' + (l ? "Replay" : "Start lesson") + "</a>" +
+        '<a class="btn ghost" href="#/read/' + o.id + '">📖 Read</a></div></div>';
     });
+    html += '<div class="card lesson-item checkpoint-card">' +
+      '<div class="lesson-num' + (cp && cp.best >= 80 ? " done" : "") + '">🏁</div>' +
+      '<div class="lesson-body"><div class="small muted">Domain checkpoint · 15 questions</div><strong>Domain ' + d.id + " review</strong>" +
+      '<p class="small muted">A mixed review of every chapter in this domain. Score 80%+ to earn the domain badge.' +
+      (cp ? " Best: " + cp.best + "%" : "") + "</p></div>" +
+      '<div class="lesson-actions"><a class="btn primary" href="#/checkpoint/' + d.id + '">' + (cp ? "Retake" : "Take checkpoint") + "</a></div></div>";
     html += "</div>";
     var labs = S.labsUI.labsForDomain(d.id);
     if (labs.length) {
@@ -402,34 +411,68 @@
     app.innerHTML = html;
   };
 
-  // ----- Lesson player -----
+  // ----- Chapter plan: sections paired with the most relevant knowledge-check questions -----
+  function words(text) {
+    var out = {};
+    stripTags(text).toLowerCase().replace(/[^a-z0-9/.-]+/g, " ").split(" ").forEach(function (w) {
+      if (w.length > 3) out[w] = true;
+    });
+    return out;
+  }
+
+  function chapterPlan(o) {
+    var ch = S.chapters[o.id];
+    var pool = shuffle(S.questions.filter(function (q) { return q.o === o.id; }));
+    // Unseen questions first so replays show new material.
+    pool.sort(function (a, b) { return (store.state.questions[a.id] ? 1 : 0) - (store.state.questions[b.id] ? 1 : 0); });
+    var checks = [];
+    if (ch) {
+      ch.sections.forEach(function (sec) {
+        var sw = words(sec.h + " " + sec.html);
+        var best = -1, bestScore = -1;
+        pool.forEach(function (q, i) {
+          var qw = words(q.q + " " + q.c.join(" ") + " " + q.e);
+          var s = 0;
+          for (var w in qw) if (sw[w]) s++;
+          if (s > bestScore) { bestScore = s; best = i; }
+        });
+        checks.push(best === -1 ? null : pool.splice(best, 1)[0]);
+      });
+    }
+    return { chapter: ch, checks: checks, rest: pool, scenario: S.scenarios[o.id] };
+  }
+
+  function scenarioQuestion(o, sc) {
+    return { id: "scn:" + o.id, generated: true, q: sc.q, c: sc.c, a: sc.a, e: "Read the step-by-step walkthrough below." };
+  }
+
+  // ----- Lesson player: read a section, answer a check, repeat; then scenario, tips, chapter quiz -----
   views.lesson = function (objId) {
     var found = findObjective(objId);
     if (!found) return notFound();
     var d = found.domain, o = found.obj;
-
-    // Concept slides: up to 3 points each.
-    var slides = [];
-    for (var i = 0; i < o.points.length; i += 3) slides.push(o.points.slice(i, i + 3));
-
-    // 3-6 exercises per lesson, preferring questions not yet seen.
-    var exCount = Math.min(6, Math.max(3, slides.length + 2));
-    var bank = shuffle(S.questions.filter(function (q) { return q.o === o.id; }));
-    bank.sort(function (a, b) { return (store.state.questions[a.id] ? 1 : 0) - (store.state.questions[b.id] ? 1 : 0); });
-    bank = bank.slice(0, exCount).map(withShuffledChoices);
-    var needed = exCount - bank.length;
-    var exercises = bank.concat(needed > 0 ? generatedExercises(d, o, needed) : []);
-
-    // Interleave: concept, exercise, concept, exercise... then remaining exercises.
+    var plan = chapterPlan(o);
+    var ch = plan.chapter;
     var steps = [];
-    var ex = exercises.slice();
-    slides.forEach(function (s, idx) {
-      steps.push({ type: "concept", points: s, part: idx + 1, of: slides.length });
-      if (ex.length) steps.push({ type: "exercise", q: ex.shift() });
-    });
-    ex.forEach(function (q) { steps.push({ type: "exercise", q: q }); });
 
-    var pos = 0, score = 0, totalEx = exercises.length, xpEarned = 0;
+    if (ch) {
+      steps.push({ type: "intro" });
+      ch.sections.forEach(function (sec, i) {
+        steps.push({ type: "read", i: i });
+        if (plan.checks[i]) steps.push({ type: "exercise", label: "Check your understanding", q: withShuffledChoices(plan.checks[i]) });
+      });
+      if (plan.scenario) steps.push({ type: "exercise", label: "Worked scenario", q: withShuffledChoices(scenarioQuestion(o, plan.scenario)), walk: plan.scenario.walk });
+      steps.push({ type: "tips" });
+      var quiz = plan.rest.slice(0, 3);
+      if (quiz.length < 3) quiz = quiz.concat(generatedExercises(d, o, 3 - quiz.length));
+      quiz.forEach(function (q, i) { steps.push({ type: "exercise", label: "Chapter quiz " + (i + 1) + "/" + quiz.length, q: q.generated ? q : withShuffledChoices(q) }); });
+    } else {
+      for (var i = 0; i < o.points.length; i += 3) steps.push({ type: "concept", points: o.points.slice(i, i + 3) });
+      plan.rest.slice(0, 4).forEach(function (q) { steps.push({ type: "exercise", label: "Exercise", q: withShuffledChoices(q) }); });
+    }
+
+    var totalEx = steps.filter(function (s) { return s.type === "exercise"; }).length;
+    var pos = 0, score = 0, xpEarned = 0;
     var answered = false, qHandle = null;
 
     function render() {
@@ -441,15 +484,28 @@
         '<div class="lesson-progress">' + progressBar(pct, d.color) + "</div>" +
         '<span class="small muted">' + (pos + 1) + "/" + steps.length + "</span></div>";
       html += '<div class="card lesson-card">';
-      if (step.type === "concept") {
-        html += '<div class="small muted">' + o.id + " · Concept " + step.part + " of " + step.of + "</div>" +
-          "<h2>" + esc(o.title) + "</h2><ul class=\"concepts\">" +
-          step.points.map(function (pt) { return "<li>" + pt + "</li>"; }).join("") + "</ul>" +
-          '<div class="row" style="margin-top:18px"><span class="spacer"></span><button class="btn primary" id="nextBtn">Got it →</button></div>';
+      var next = '<div class="row" style="margin-top:22px"><span class="spacer"></span><button class="btn primary" id="nextBtn">Continue →</button></div>';
+      if (step.type === "intro") {
+        html += '<div class="eyebrow">Chapter ' + o.id + " · " + esc(d.name) + "</div><h1>" + esc(o.title) + "</h1>" +
+          '<p class="lead">' + ch.overview + "</p>" +
+          '<div class="toc"><div class="small muted">In this chapter</div><ol>' +
+          ch.sections.map(function (s) { return "<li>" + s.h + "</li>"; }).join("") +
+          (plan.scenario ? "<li>Worked scenario</li>" : "") + "<li>Exam tips &amp; traps</li><li>Chapter quiz</li></ol></div>" +
+          '<p class="small muted">After each section you\'ll answer a question about it before moving on.</p>' + next;
+      } else if (step.type === "read") {
+        var sec = ch.sections[step.i];
+        html += '<div class="eyebrow">' + o.id + " · Section " + (step.i + 1) + " of " + ch.sections.length + "</div><h2>" + sec.h + "</h2>" +
+          '<div class="prose">' + sec.html + "</div>" + next;
+      } else if (step.type === "tips") {
+        html += '<div class="eyebrow">' + o.id + " · Before the quiz</div><h2>Exam tips &amp; common traps</h2>" +
+          '<div class="tips-grid"><div class="tip-box good"><h3>✅ Exam tips</h3><ul>' + ch.tips.map(function (t) { return "<li>" + t + "</li>"; }).join("") + "</ul></div>" +
+          '<div class="tip-box bad"><h3>⚠️ Common traps</h3><ul>' + ch.traps.map(function (t) { return "<li>" + t + "</li>"; }).join("") + "</ul></div></div>" + next;
+      } else if (step.type === "concept") {
+        html += '<div class="eyebrow">' + o.id + '</div><h2>' + esc(o.title) + '</h2><ul class="concepts">' +
+          step.points.map(function (pt) { return "<li>" + pt + "</li>"; }).join("") + "</ul>" + next;
       } else {
-        html += '<div class="small muted">' + o.id + " · Exercise" + (step.q.generated ? " · Term match" : "") +
-          ' <span class="pill">+' + XP.lessonExercise + ' XP</span></div><div id="qbox" style="margin-top:10px"></div>' +
-          '<div class="row" style="margin-top:16px"><span class="spacer"></span><button class="btn primary" id="nextBtn" hidden>Continue →</button></div>';
+        html += '<div class="eyebrow">' + o.id + " · " + step.label + ' <span class="pill">+' + XP.lessonExercise + ' XP</span></div><div id="qbox" style="margin-top:10px"></div>' +
+          '<div id="walk"></div><div class="row" style="margin-top:16px"><span class="spacer"></span><button class="btn primary" id="nextBtn" hidden>Continue →</button></div>';
       }
       html += "</div>";
       app.innerHTML = html;
@@ -463,6 +519,7 @@
             answered = true;
             if (!step.q.generated) store.recordAnswer(step.q.id, correct);
             if (correct) { score++; xpEarned += XP.lessonExercise; gainXP(XP.lessonExercise); }
+            if (step.walk) document.getElementById("walk").innerHTML = '<div class="walkthrough"><h3>Walkthrough</h3>' + step.walk + "</div>";
             nextBtn.hidden = false;
             nextBtn.focus();
           }
@@ -485,18 +542,21 @@
       if (firstTime) { xpEarned += XP.lessonComplete; gainXP(XP.lessonComplete); }
       var nxt = nextLesson();
       var pct = Math.round(score / totalEx * 100);
+      var domainDone = domainLessonProgress(d).done === d.objectives.length;
       app.innerHTML = '<div class="card lesson-card center">' +
         '<div class="celebrate">' + (pct >= 70 ? "🏆" : "📘") + "</div>" +
-        "<h1>Lesson complete!</h1><p class=\"muted\">" + o.id + " " + esc(o.title) + "</p>" +
+        "<h1>Chapter complete!</h1><p class=\"muted\">" + o.id + " " + esc(o.title) + "</p>" +
         '<div class="grid grid-3" style="margin:20px 0">' +
-        statTile(score + "/" + totalEx, "exercises correct") +
+        statTile(score + "/" + totalEx, "questions correct") +
         statTile("+" + xpEarned, "XP earned") +
         statTile(store.streak() + " 🔥", "day streak") + "</div>" +
-        (pct < 70 ? '<p class="small muted">Tip: replay this lesson or review the flashcards for Domain ' + d.id + " to lock it in.</p>" : "") +
+        (pct < 70 ? '<p class="small muted">Tip: re-read the chapter in reading mode, then replay the lesson. New questions are served first.</p>' : "") +
         '<div class="row" style="justify-content:center">' +
+        '<a class="btn" href="#/read/' + o.id + '">📖 Re-read</a>' +
         '<a class="btn" href="#/lesson/' + o.id + '">Replay</a>' +
-        '<a class="btn" href="#/course/' + d.id + '">Back to course</a>' +
-        (nxt ? '<a class="btn primary" href="#/lesson/' + nxt.obj.id + '">Next: ' + nxt.obj.id + " →</a>" : '<a class="btn primary" href="#/exam">Take the exam sim →</a>') +
+        (domainDone ? '<a class="btn primary" href="#/checkpoint/' + d.id + '">🏁 Domain ' + d.id + " checkpoint →</a>" : "") +
+        (nxt && !domainDone ? '<a class="btn primary" href="#/lesson/' + nxt.obj.id + '">Next: ' + nxt.obj.id + " →</a>" : "") +
+        (!nxt && !domainDone ? '<a class="btn primary" href="#/exam">Take the exam sim →</a>' : "") +
         "</div></div>";
     }
 
@@ -510,6 +570,77 @@
     });
 
     render();
+  };
+
+  // ----- Reading mode: the full chapter with inline knowledge checks -----
+  views.read = function (objId) {
+    var found = findObjective(objId);
+    if (!found) return notFound();
+    var d = found.domain, o = found.obj;
+    var plan = chapterPlan(o);
+    var ch = plan.chapter;
+    if (!ch) return notFound();
+    var all = allObjectives();
+    var idx = all.map(function (x) { return x.obj.id; }).indexOf(o.id);
+    var prev = all[idx - 1], nxt = all[idx + 1];
+
+    var html = '<article class="reader"><a href="#/course/' + d.id + '" class="small">← ' + esc(d.name) + "</a>" +
+      '<div class="eyebrow" style="margin-top:14px">Chapter ' + o.id + "</div><h1>" + esc(o.title) + "</h1>" +
+      '<p class="lead">' + ch.overview + "</p>" +
+      '<nav class="toc"><div class="small muted">Contents</div><ol>' +
+      ch.sections.map(function (s, i) { return '<li><a href="javascript:void 0" data-jump="sec' + i + '">' + s.h + "</a></li>"; }).join("") +
+      "</ol></nav>";
+    ch.sections.forEach(function (sec, i) {
+      html += '<section class="card reader-section" id="sec' + i + '"><div class="eyebrow">Section ' + (i + 1) + "</div><h2>" + sec.h + "</h2>" +
+        '<div class="prose">' + sec.html + "</div>" +
+        (plan.checks[i] ? '<div class="inline-check"><div class="eyebrow">🧠 Check your understanding</div><div data-check="' + i + '"></div></div>' : "") +
+        "</section>";
+    });
+    if (plan.scenario) {
+      html += '<section class="card reader-section"><div class="eyebrow">Worked scenario</div><h2>Apply it</h2><div data-check="scenario"></div><div id="walk"></div></section>';
+    }
+    html += '<section class="card reader-section"><h2>Exam tips &amp; common traps</h2><div class="tips-grid">' +
+      '<div class="tip-box good"><h3>✅ Exam tips</h3><ul>' + ch.tips.map(function (t) { return "<li>" + t + "</li>"; }).join("") + "</ul></div>" +
+      '<div class="tip-box bad"><h3>⚠️ Common traps</h3><ul>' + ch.traps.map(function (t) { return "<li>" + t + "</li>"; }).join("") + "</ul></div></div></section>";
+    html += '<div class="row reader-nav">' +
+      (prev ? '<a class="btn" href="#/read/' + prev.obj.id + '">← ' + prev.obj.id + "</a>" : "") + '<span class="spacer"></span>' +
+      '<a class="btn primary" href="#/lesson/' + o.id + '">Take the interactive lesson</a>' +
+      (nxt ? '<a class="btn" href="#/read/' + nxt.obj.id + '">' + nxt.obj.id + " →</a>" : "") + "</div></article>";
+    app.innerHTML = html;
+
+    app.querySelectorAll("[data-jump]").forEach(function (a) {
+      a.onclick = function () { document.getElementById(a.dataset.jump).scrollIntoView({ behavior: "smooth" }); };
+    });
+    app.querySelectorAll("[data-check]").forEach(function (el) {
+      var key = el.dataset.check;
+      var isScenario = key === "scenario";
+      var q = isScenario ? scenarioQuestion(o, plan.scenario) : plan.checks[Number(key)];
+      renderQuestion(el, {
+        question: withShuffledChoices(q),
+        onAnswer: function (correct) {
+          if (!isScenario) store.recordAnswer(q.id, correct);
+          if (correct) gainXP(XP.quizCorrect);
+          if (isScenario) document.getElementById("walk").innerHTML = '<div class="walkthrough"><h3>Walkthrough</h3>' + plan.scenario.walk + "</div>";
+        }
+      });
+    });
+  };
+
+  // ----- Domain checkpoint -----
+  views.checkpoint = function (id) {
+    var d = domainById(Number(id));
+    if (!d) return notFound();
+    // Spread questions across the domain's chapters, then fill up to 15.
+    var picked = [];
+    d.objectives.forEach(function (o) {
+      picked = picked.concat(shuffle(S.questions.filter(function (q) { return q.o === o.id; })).slice(0, 2));
+    });
+    picked = shuffle(picked).slice(0, 15);
+    var rest = shuffle(S.questions.filter(function (q) { return q.d === d.id && picked.indexOf(q) === -1; }));
+    while (picked.length < 15 && rest.length) picked.push(rest.pop());
+    runQuiz(shuffle(picked), "Domain " + d.id + " checkpoint", "#/course/" + d.id, function (score, total) {
+      store.completeCheckpoint(d.id, Math.round(score / total * 100));
+    });
   };
 
   // ----- Practice hub -----
@@ -535,7 +666,7 @@
   }
 
   // ----- Quiz engine (custom quiz, daily practice, review) -----
-  function runQuiz(questions, label, backHref) {
+  function runQuiz(questions, label, backHref, onFinish) {
     questions = questions.map(withShuffledChoices);
     var pos = 0, score = 0, qHandle = null, answered = false;
     var results = [];
@@ -575,6 +706,7 @@
 
     function finish() {
       store.addHistory({ mode: "quiz", label: label, score: score, total: questions.length });
+      if (onFinish) onFinish(score, questions.length);
       var pct = Math.round(score / questions.length * 100);
       var missed = results.filter(function (r) { return !r.correct; });
       app.innerHTML = '<div class="card lesson-card center"><div class="celebrate">' + (pct >= 80 ? "🎉" : "💪") + "</div>" +
@@ -1006,6 +1138,8 @@
     [/^courses$/, views.courses, "courses"],
     [/^course\/(\d+)$/, views.course, "courses"],
     [/^lesson\/([\d.]+)$/, views.lesson, "courses"],
+    [/^read\/([\d.]+)$/, views.read, "courses"],
+    [/^checkpoint\/(\d+)$/, views.checkpoint, "courses"],
     [/^practice$/, views.practice, "practice"],
     [/^practice\/daily$/, views.daily, "practice"],
     [/^practice\/quiz$/, views.quizSetup, "practice"],
@@ -1047,8 +1181,8 @@
     var root = document.documentElement;
     try {
       var saved = localStorage.getItem("secplus.theme");
-      if (saved) root.setAttribute("data-theme", saved);
-    } catch (e) { /* ignore */ }
+      root.setAttribute("data-theme", saved || "dark");
+    } catch (e) { root.setAttribute("data-theme", "dark"); }
     document.getElementById("themeToggle").onclick = function () {
       var dark = root.getAttribute("data-theme")
         ? root.getAttribute("data-theme") === "dark"

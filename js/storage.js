@@ -13,6 +13,7 @@ SECPLUS.store = (function () {
       xp: 0,
       lessons: {},     // objId -> { done: true, score, total, date }
       labs: {},        // labId -> { best, total, passed, date }
+      checkpoints: {}, // domainId -> { best, last, date }
       cards: {},       // cardId -> { box, due }
       questions: {},   // qid -> { seen, correct, last }
       history: [],     // { date, mode, label, score, total }
@@ -105,6 +106,12 @@ SECPLUS.store = (function () {
         passed: (prev && prev.passed) || score === total,
         date: dayKey()
       };
+      save();
+    },
+
+    completeCheckpoint: function (domainId, pct) {
+      var prev = state.checkpoints[domainId];
+      state.checkpoints[domainId] = { best: prev ? Math.max(prev.best, pct) : pct, last: pct, date: dayKey() };
       save();
     },
 
