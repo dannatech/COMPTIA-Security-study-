@@ -12,6 +12,7 @@ SECPLUS.store = (function () {
     return {
       xp: 0,
       lessons: {},     // objId -> { done: true, score, total, date }
+      labs: {},        // labId -> { best, total, passed, date }
       cards: {},       // cardId -> { box, due }
       questions: {},   // qid -> { seen, correct, last }
       history: [],     // { date, mode, label, score, total }
@@ -91,6 +92,17 @@ SECPLUS.store = (function () {
         done: true,
         score: prev ? Math.max(prev.score, score) : score,
         total: total,
+        date: dayKey()
+      };
+      save();
+    },
+
+    completeLab: function (labId, score, total) {
+      var prev = state.labs[labId];
+      state.labs[labId] = {
+        best: prev ? Math.max(prev.best, score) : score,
+        total: total,
+        passed: (prev && prev.passed) || score === total,
         date: dayKey()
       };
       save();

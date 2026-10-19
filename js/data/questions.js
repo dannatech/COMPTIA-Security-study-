@@ -572,3 +572,16 @@ SECPLUS.questions = [
     e: "Unknown removable media may contain malware (baiting). Report and hand it to security rather than connecting it anywhere."
   }
 ];
+
+// Bulk-add helper used by questions-d*.js. Each entry: [objective, question, choices, answer, explanation].
+// IDs are derived from the question text so progress stays stable when questions are added or reordered.
+SECPLUS.addQuestions = function (list) {
+  function hash(s) {
+    var h = 5381;
+    for (var i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0;
+    return h.toString(36);
+  }
+  list.forEach(function (x) {
+    SECPLUS.questions.push({ id: "q" + x[0] + "-" + hash(x[1]), d: Number(x[0].charAt(0)), o: x[0], q: x[1], c: x[2], a: x[3], e: x[4] });
+  });
+};

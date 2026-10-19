@@ -237,6 +237,11 @@
     };
   }
 
+  S.ui = {
+    esc: esc, shuffle: shuffle, gainXP: gainXP, domainById: domainById,
+    renderQuestion: renderQuestion, isCorrect: isCorrect
+  };
+
   // ---------- Views ----------
   var views = {};
 
@@ -385,6 +390,15 @@
         '<a class="btn ' + (l ? "" : "primary") + '" href="#/lesson/' + o.id + '">' + (l ? "Replay" : "Start") + "</a></div>";
     });
     html += "</div>";
+    var labs = S.labsUI.labsForDomain(d.id);
+    if (labs.length) {
+      html += '<h2 style="margin-top:28px">🧪 Hands-on labs</h2><div class="lesson-list">' + labs.map(function (lab) {
+        var r = store.state.labs[lab.id];
+        return '<div class="card lesson-item"><div class="lesson-num' + (r && r.passed ? " done" : "") + '">' + (r && r.passed ? "✓" : "🧪") + "</div>" +
+          '<div class="lesson-body"><div class="small muted">Objective ' + lab.o + "</div><strong>" + esc(lab.title) + "</strong></div>" +
+          '<a class="btn" href="#/lab/' + lab.id + '">' + (r ? "Retry" : "Start") + "</a></div>";
+      }).join("") + "</div>";
+    }
     app.innerHTML = html;
   };
 
@@ -398,8 +412,12 @@
     var slides = [];
     for (var i = 0; i < o.points.length; i += 3) slides.push(o.points.slice(i, i + 3));
 
-    var bank = shuffle(S.questions.filter(function (q) { return q.o === o.id; })).map(withShuffledChoices);
-    var needed = Math.max(3, slides.length + 1) - bank.length;
+    // 3-6 exercises per lesson, preferring questions not yet seen.
+    var exCount = Math.min(6, Math.max(3, slides.length + 2));
+    var bank = shuffle(S.questions.filter(function (q) { return q.o === o.id; }));
+    bank.sort(function (a, b) { return (store.state.questions[a.id] ? 1 : 0) - (store.state.questions[b.id] ? 1 : 0); });
+    bank = bank.slice(0, exCount).map(withShuffledChoices);
+    var needed = exCount - bank.length;
     var exercises = bank.concat(needed > 0 ? generatedExercises(d, o, needed) : []);
 
     // Interleave: concept, exercise, concept, exercise... then remaining exercises.
@@ -505,6 +523,7 @@
       practiceCard("🃏", "Flashcards", S.flashcards.length + " cards with spaced repetition · " + due + " due · " + newCards + " new.", "#/practice/flashcards", "Review") +
       practiceCard("📝", "Custom quiz", "Pick a domain and number of questions. Instant feedback with explanations.", "#/practice/quiz", "Build quiz") +
       practiceCard("🔌", "Ports & protocols", "Drill the " + S.ports.length + " ports you need to know.", "#/practice/ports", "Drill") +
+      practiceCard("🧪", "Hands-on labs", S.labs.length + " PBQ-style labs: firewall rules, log analysis, ordering, matching and risk calculations.", "#/labs", "Open labs") +
       practiceCard("⏱️", "Exam simulation", "Timed, mixed-domain test weighted like the real exam.", "#/exam", "Start exam") +
       practiceCard("🔁", "Review mistakes", wrong + " question" + (wrong === 1 ? "" : "s") + " you last answered incorrectly.", "#/review", "Review") +
       "</div>";
@@ -993,7 +1012,9 @@
     [/^practice\/flashcards$/, views.flashcards, "practice"],
     [/^practice\/ports$/, views.ports, "practice"],
     [/^exam$/, views.exam, "exam"],
-    [/^review$/, views.review, "review"]
+    [/^review$/, views.review, "review"],
+    [/^labs$/, function () { S.labsUI.list(app); }, "labs"],
+    [/^lab\/([\w-]+)$/, function (id) { S.labsUI.run(app, id); }, "labs"]
   ];
 
   function route() {
