@@ -47,6 +47,8 @@ All study content lives in `js/data/`:
 
 Add a question with the right `o` (objective) and it automatically appears in that lesson, the quizzes and the exam simulator.
 
+Before committing, check the content with `node scripts/validate-data.js` (needs Node, no install). It catches unknown objectives, out-of-range answer indexes, duplicate questions, flashcards, choices and IDs, and broken lab definitions. The same check runs on every pull request through GitHub Actions.
+
 ## Project structure
 
 ```
@@ -56,4 +58,5 @@ js/storage.js       Progress, XP, streaks, spaced repetition (localStorage)
 js/app.js           Router and all views
 js/labs.js          Hands-on lab engines (ordering, matching, firewall, logs, numeric)
 js/data/*.js        Study content
+scripts/validate-data.js  Content checks (also run in CI)
 ```
