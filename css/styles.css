@@ -810,7 +810,7 @@ h2, h3 { font-weight: 700; }
 .progress > span { background: var(--grad); }
 
 
-.choice { border-radius: 12px; transition: border-color .15s, transform .12s; }
+.choice { border-radius: 12px; transition: border-color .15s, background-color .15s, color .15s, transform .12s; }
 .choice:hover:not(:disabled) { transform: translateX(2px); }
 
 select, input[type="text"], input[type="number"] { background: var(--surface-solid); border-radius: 10px; }
@@ -922,7 +922,10 @@ code {
 .lesson-num.done { background: var(--accent); color: var(--bg); }
 .nav a.active { color: var(--text); background: var(--surface-2); }
 .eyebrow { color: var(--muted); }
-.choice.selected { border-color: var(--accent); background: var(--surface-2); }
+/* Hover is a quiet outline; a picked answer is filled solid so the two never look alike. */
+.choice:hover:not(:disabled):not(.selected) { border-color: var(--accent-2); background: var(--surface-2); }
+.choice.selected:not(.correct):not(.wrong) { border-color: var(--accent); background: var(--accent); color: var(--bg); font-weight: 600; }
+.choice.selected:not(.correct):not(.wrong) .key { color: var(--bg); }
 .choice.correct { border-color: var(--good); border-width: 2px; background: var(--surface-2); }
 .explanation.good, .walkthrough, .inline-check, .checkpoint-card { border-color: var(--border); }
 .walkthrough, .inline-check, .tip-box.good { background: var(--surface-2); }
